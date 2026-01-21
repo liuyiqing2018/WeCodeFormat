@@ -12,6 +12,9 @@ interface Settings {
   codeMarginBottom: number;
   fontSize: number;
   lineHeight: number;
+  h1Align: 'left' | 'center' | 'right';
+  h2Align: 'left' | 'center' | 'right';
+  h3Align: 'left' | 'center' | 'right';
 }
 
 // Preset Themes
@@ -60,7 +63,11 @@ function App() {
   const [markdown, setMarkdown] = useState(DEFAULT_MARKDOWN);
   const [htmlOutput, setHtmlOutput] = useState("");
   const [copyStatus, setCopyStatus] = useState("复制 HTML");
-  
+
+  // Undo/Redo History
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   // Settings State
   const [settings, setSettings] = useState<Settings>({
     headingColor: "#1e88e5",
@@ -71,6 +78,9 @@ function App() {
     codeMarginBottom: 15,
     fontSize: 16,
     lineHeight: 1.8,
+    h1Align: "center",
+    h2Align: "center",
+    h3Align: "left",
   });
 
   const [showSettings, setShowSettings] = useState(false);
@@ -100,11 +110,16 @@ function App() {
     renderer.heading = (text, level) => {
        const commonStyle = `font-weight: bold; line-height: 1.4; color: ${settings.headingColor};`;
        if (level === 1) {
-           return `<h1 style="${commonStyle} margin: 20px 0 30px; font-size: ${settings.fontSize * 1.4}px; text-align: center;">${text}</h1>`;
+           return `<h1 style="${commonStyle} margin: 20px 0 30px; font-size: ${settings.fontSize * 1.4}px; text-align: ${settings.h1Align};">${text}</h1>`;
        } else if (level === 2) {
-           return `<section style="margin-top: 40px; margin-bottom: 20px; text-align: center;"><span style="font-size: ${settings.fontSize * 1.125}px; font-weight: bold; border-bottom: 2px solid ${settings.headingColor}; color: ${settings.headingColor}; padding-bottom: 5px; display: inline-block;">${text}</span></section>`;
+           const h2Align = settings.h2Align === 'center' ? 'text-align: center;' : `text-align: ${settings.h2Align};`;
+           const h2Display = settings.h2Align === 'center' ? 'display: inline-block;' : 'display: block;';
+           return `<section style="margin-top: 40px; margin-bottom: 20px; ${h2Align}"><span style="font-size: ${settings.fontSize * 1.125}px; font-weight: bold; border-bottom: 2px solid ${settings.headingColor}; color: ${settings.headingColor}; padding-bottom: 5px; ${h2Display}">${text}</span></section>`;
        } else {
-           return `<h3 style="${commonStyle} margin: 25px 0 10px; font-size: ${settings.fontSize}px; border-left: 4px solid ${settings.headingColor}; padding-left: 10px;">${text}</h3>`;
+           const h3Border = settings.h3Align === 'left' ? 'border-left: 4px solid;' : '';
+           const h3Padding = settings.h3Align === 'left' ? 'padding-left: 10px;' : '';
+           const borderColor = settings.h3Align === 'left' ? `${settings.headingColor}` : 'transparent';
+           return `<h3 style="${commonStyle} margin: 25px 0 10px; font-size: ${settings.fontSize}px; ${h3Border} border-color: ${borderColor}; ${h3Padding} text-align: ${settings.h3Align};">${text}</h3>`;
        }
     };
 
@@ -168,6 +183,21 @@ ${rawHtml}
     }
   }, [markdown, settings]);
 
+  // History Management (Undo/Redo)
+  useEffect(() => {
+    if (history.length === 0 || history[historyIndex] !== markdown) {
+      const newHistory = historyIndex < history.length - 1
+        ? history.slice(0, historyIndex + 1)
+        : [...history];
+      const limitedHistory = newHistory.length > 50
+        ? newHistory.slice(-50)
+        : newHistory;
+      limitedHistory.push(markdown);
+      setHistory(limitedHistory);
+      setHistoryIndex(limitedHistory.length - 1);
+    }
+  }, [markdown]);
+
 
   // -------------------------------------------------------------------------
   // Event Handlers
@@ -184,27 +214,183 @@ ${rawHtml}
     }
   };
 
-  // Keyboard Shortcuts (Ctrl+B)
+  // Keyboard Shortcuts Helper
+  const applyFormat = (e: React.KeyboardEvent<HTMLTextAreaElement>, prefix: string, suffix: string = prefix) => {
+    e.preventDefault();
+    const textarea = e.currentTarget;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const val = textarea.value;
+
+    const selected = val.substring(start, end);
+    const replacement = `${prefix}${selected}${suffix}`;
+
+    const newVal = val.substring(0, start) + replacement + val.substring(end);
+    setMarkdown(newVal);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+    }, 0);
+  };
+
+  const insertBlock = (e: React.KeyboardEvent<HTMLTextAreaElement>, blockStart: string, blockEnd: string = "") => {
+    e.preventDefault();
+    const textarea = e.currentTarget;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const val = textarea.value;
+
+    const selected = val.substring(start, end);
+    const replacement = `${blockStart}${selected}${blockEnd}\n`;
+
+    const newVal = val.substring(0, start) + replacement + val.substring(end);
+    setMarkdown(newVal);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + blockStart.length, start + blockStart.length + selected.length);
+    }, 0);
+  };
+
+  // Keyboard Shortcuts
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+    const ctrlOrCmd = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    const alt = e.altKey;
+
+    // Undo: Ctrl+Z
+    if (ctrlOrCmd && !shift && !alt && e.key === 'z') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        setHistoryIndex(historyIndex - 1);
+        setMarkdown(history[historyIndex - 1]);
+      }
+      return;
+    }
+
+    // Redo: Ctrl+Shift+Z or Ctrl+Y
+    if ((ctrlOrCmd && shift && e.key === 'Z') || (ctrlOrCmd && e.key === 'y')) {
+      e.preventDefault();
+      if (historyIndex < history.length - 1) {
+        setHistoryIndex(historyIndex + 1);
+        setMarkdown(history[historyIndex + 1]);
+      }
+      return;
+    }
+
+    // Bold: Ctrl+B
+    if (ctrlOrCmd && !shift && (e.key === 'b' || e.key === 'B')) {
+      applyFormat(e, "**");
+      return;
+    }
+
+    // Italic: Ctrl+I
+    if (ctrlOrCmd && !shift && (e.key === 'i' || e.key === 'I')) {
+      applyFormat(e, "*");
+      return;
+    }
+
+    // Strikethrough: Ctrl+Shift+S
+    if (ctrlOrCmd && shift && (e.key === 's' || e.key === 'S')) {
+      applyFormat(e, "~~");
+      return;
+    }
+
+    // Ordered List: Ctrl+Shift+O
+    if (ctrlOrCmd && shift && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault();
       const textarea = e.currentTarget;
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
       const val = textarea.value;
-      
       const selected = val.substring(start, end);
-      const replacement = `**${selected}**`;
-      
-      const newVal = val.substring(0, start) + replacement + val.substring(end);
+      const lines = selected.split('\n');
+      const numberedLines = lines.map((line, i) => `${i + 1}. ${line}`).join('\n');
+      const newVal = val.substring(0, start) + numberedLines + val.substring(end);
       setMarkdown(newVal);
-      
-      // Restore cursor selection (wrapping the text)
-      // Use setTimeout to ensure React render cycle completes if needed, though usually works directly
-      setTimeout(() => {
-          textarea.focus();
-          textarea.setSelectionRange(start + 2, end + 2);
-      }, 0);
+      setTimeout(() => textarea.focus(), 0);
+      return;
+    }
+
+    // Unordered List: Ctrl+Shift+U
+    if (ctrlOrCmd && shift && (e.key === 'u' || e.key === 'U')) {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const val = textarea.value;
+      const selected = val.substring(start, end);
+      const lines = selected.split('\n');
+      const bulletedLines = lines.map(line => `- ${line}`).join('\n');
+      const newVal = val.substring(0, start) + bulletedLines + val.substring(end);
+      setMarkdown(newVal);
+      setTimeout(() => textarea.focus(), 0);
+      return;
+    }
+
+    // Code Block: Ctrl+Shift+C
+    if (ctrlOrCmd && shift && (e.key === 'c' || e.key === 'C')) {
+      insertBlock(e, "```\n", "\n```");
+      return;
+    }
+
+    // Inline Code: Ctrl+Shift+K
+    if (ctrlOrCmd && shift && (e.key === 'k' || e.key === 'K')) {
+      applyFormat(e, "`");
+      return;
+    }
+
+    // Blockquote: Ctrl+Shift+Q
+    if (ctrlOrCmd && shift && (e.key === 'q' || e.key === 'Q')) {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const val = textarea.value;
+      const selected = val.substring(start, end);
+      const lines = selected.split('\n');
+      const quotedLines = lines.map(line => `> ${line}`).join('\n');
+      const newVal = val.substring(0, start) + quotedLines + val.substring(end);
+      setMarkdown(newVal);
+      setTimeout(() => textarea.focus(), 0);
+      return;
+    }
+
+    // Link: Ctrl+Shift+L
+    if (ctrlOrCmd && shift && (e.key === 'l' || e.key === 'L')) {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const val = textarea.value;
+      const selected = val.substring(start, end);
+      const url = prompt("请输入链接地址:", "https://");
+      if (url !== null) {
+        const replacement = `[${selected}](${url})`;
+        const newVal = val.substring(0, start) + replacement + val.substring(end);
+        setMarkdown(newVal);
+        setTimeout(() => textarea.focus(), 0);
+      }
+      return;
+    }
+
+    // H1: Ctrl+Alt+1
+    if (ctrlOrCmd && alt && e.key === '1') {
+      applyFormat(e, "# ");
+      return;
+    }
+
+    // H2: Ctrl+Alt+2
+    if (ctrlOrCmd && alt && e.key === '2') {
+      applyFormat(e, "## ");
+      return;
+    }
+
+    // H3: Ctrl+Alt+3
+    if (ctrlOrCmd && alt && e.key === '3') {
+      applyFormat(e, "### ");
+      return;
     }
   };
 
@@ -247,28 +433,29 @@ ${rawHtml}
 }
 
 .markdown-preview-view h1 {
-  text-align: center !important;
+  text-align: ${settings.h1Align} !important;
   font-size: ${settings.fontSize * 1.4}px !important;
   color: ${settings.headingColor} !important;
   margin: 20px 0 30px !important;
 }
 
 .markdown-preview-view h2 {
-  text-align: center !important;
+  text-align: ${settings.h2Align} !important;
   border-bottom: 2px solid ${settings.headingColor} !important;
   color: ${settings.headingColor} !important;
   font-size: ${settings.fontSize * 1.125}px !important;
   margin-top: 40px !important;
   margin-bottom: 20px !important;
-  display: inline-block !important;
+  ${settings.h2Align === 'center' ? 'display: inline-block !important;' : ''}
 }
 
 .markdown-preview-view h3 {
-  border-left: 4px solid ${settings.headingColor} !important;
-  padding-left: 10px !important;
+  ${settings.h3Align === 'left' ? 'border-left: 4px solid ' + settings.headingColor + ' !important;' : ''}
+  ${settings.h3Align === 'left' ? 'padding-left: 10px !important;' : ''}
   color: ${settings.headingColor} !important;
   font-size: ${settings.fontSize}px !important;
   margin: 25px 0 10px !important;
+  text-align: ${settings.h3Align} !important;
 }
 
 .markdown-preview-view p {
@@ -456,11 +643,86 @@ ${rawHtml}
               <div style={{display: 'flex', justifyContent: 'space-between'}}>
                 <span style={{fontSize: '13px'}}>代码块下边距 ({settings.codeMarginBottom}px)</span>
               </div>
-              <input 
+              <input
                 type="range" min="0" max="50" step="1"
                 value={settings.codeMarginBottom}
                 onChange={(e) => setSettings({...settings, codeMarginBottom: Number(e.target.value)})}
               />
+           </div>
+
+           <hr style={{border: 'none', borderTop: '1px solid #eee', width: '100%'}}/>
+
+           <div style={{fontSize: '14px', fontWeight: 'bold', color: '#333'}}>标题对齐</div>
+
+           <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+              <div>
+                 <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>H1 标题</div>
+                 <div style={{display: 'flex', gap: '5px'}}>
+                   {(['left', 'center', 'right'] as const).map(align => (
+                     <button
+                       key={align}
+                       onClick={() => setSettings({...settings, h1Align: align})}
+                       style={{
+                         flex: 1,
+                         padding: '6px',
+                         border: settings.h1Align === align ? '2px solid ' + settings.headingColor : '1px solid #ddd',
+                         background: settings.h1Align === align ? '#f0f0f0' : 'white',
+                         borderRadius: '4px',
+                         cursor: 'pointer',
+                         fontSize: '12px'
+                       }}
+                     >
+                       {align === 'left' ? '左' : align === 'center' ? '中' : '右'}
+                     </button>
+                   ))}
+                 </div>
+              </div>
+
+              <div>
+                 <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>H2 标题</div>
+                 <div style={{display: 'flex', gap: '5px'}}>
+                   {(['left', 'center', 'right'] as const).map(align => (
+                     <button
+                       key={align}
+                       onClick={() => setSettings({...settings, h2Align: align})}
+                       style={{
+                         flex: 1,
+                         padding: '6px',
+                         border: settings.h2Align === align ? '2px solid ' + settings.headingColor : '1px solid #ddd',
+                         background: settings.h2Align === align ? '#f0f0f0' : 'white',
+                         borderRadius: '4px',
+                         cursor: 'pointer',
+                         fontSize: '12px'
+                       }}
+                     >
+                       {align === 'left' ? '左' : align === 'center' ? '中' : '右'}
+                     </button>
+                   ))}
+                 </div>
+              </div>
+
+              <div>
+                 <div style={{fontSize: '12px', color: '#666', marginBottom: '5px'}}>H3 标题</div>
+                 <div style={{display: 'flex', gap: '5px'}}>
+                   {(['left', 'center', 'right'] as const).map(align => (
+                     <button
+                       key={align}
+                       onClick={() => setSettings({...settings, h3Align: align})}
+                       style={{
+                         flex: 1,
+                         padding: '6px',
+                         border: settings.h3Align === align ? '2px solid ' + settings.headingColor : '1px solid #ddd',
+                         background: settings.h3Align === align ? '#f0f0f0' : 'white',
+                         borderRadius: '4px',
+                         cursor: 'pointer',
+                         fontSize: '12px'
+                       }}
+                     >
+                       {align === 'left' ? '左' : align === 'center' ? '中' : '右'}
+                     </button>
+                   ))}
+                 </div>
+              </div>
            </div>
         </div>
       )}
@@ -524,7 +786,7 @@ ${rawHtml}
             }}
           >
             <span>Markdown 输入</span>
-            <span style={{fontSize: '10px', color: '#999'}}>快捷键: Ctrl+B 加粗</span>
+            <span style={{fontSize: '10px', color: '#999'}}>快捷键: Ctrl+B 加粗 | Ctrl+I 斜体 | Ctrl+Shift+C 代码 | Ctrl+Z 撤销</span>
           </div>
           <textarea
             ref={editorRef}
@@ -591,7 +853,7 @@ ${rawHtml}
               style={{
                 width: "100%",
                 maxWidth: "600px",
-                minHeight: "800px",
+                minHeight: "100px",
                 background: "white",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
                 padding: "20px",
