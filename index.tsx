@@ -479,7 +479,7 @@ ${rawHtml}
              }}>
                  <h3 style={{margin: 0}}>Obsidian 集成方案</h3>
                  <p style={{fontSize: '13px', color: '#666', margin: 0}}>
-                    复制下方的 CSS 代码，保存为 <code>wechat-style.css</code>，放入你的 Obsidian 仓库的 <code>.obsidian/snippets</code> 文件夹中，然后在【设置 -> 外观 -> CSS 代码片段】中启用即可。
+                    复制下方的 CSS 代码，保存为 <code>wechat-style.css</code>，放入你的 Obsidian 仓库的 <code>.obsidian/snippets</code> 文件夹中，然后在【设置 -&gt; 外观 -&gt; CSS 代码片段】中启用即可。
                  </p>
                  <textarea 
                     readOnly 
